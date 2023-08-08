@@ -536,27 +536,27 @@ export default class StepsHandler {
     }
 
     getStrictGherkinType(gherkinPart: string, lineNumber: number, text: string) {
-        const gherkinType = getGherkinType(gherkinPart);
-        if (gherkinType === GherkinType.And || gherkinType === GherkinType.But) {
-            return text
-                .split(/\r?\n/g)
-                .slice(0, lineNumber)
-                .reduceRight((res, val) => {
-                    if (res === GherkinType.Other) {
-                        const match = this.getGherkinMatch(val, text);
-                        if (match) {
-                            const [, , prevGherkinPart] = match;
-                            const prevGherkinPartType = getGherkinTypeLower(prevGherkinPart);
-                            if (~[GherkinType.Given, GherkinType.When, GherkinType.Then].indexOf(prevGherkinPartType)) {
-                                res = prevGherkinPartType;
-                            }
-                        }
-                    }
-                    return res;
-                }, GherkinType.Other);
-        } else {
+        // const gherkinType = getGherkinType(gherkinPart);
+        // if (gherkinType === GherkinType.And || gherkinType === GherkinType.But) {
+        //     return text
+        //         .split(/\r?\n/g)
+        //         .slice(0, lineNumber)
+        //         .reduceRight((res, val) => {
+        //             if (res === GherkinType.Other) {
+        //                 const match = this.getGherkinMatch(val, text);
+        //                 if (match) {
+        //                     const [, , prevGherkinPart] = match;
+        //                     const prevGherkinPartType = getGherkinTypeLower(prevGherkinPart);
+        //                     if (~[GherkinType.Given, GherkinType.When, GherkinType.Then].indexOf(prevGherkinPartType)) {
+        //                         res = prevGherkinPartType;
+        //                     }
+        //                 }
+        //             }
+        //             return res;
+        //         }, GherkinType.Other);
+        // } else {
             return getGherkinTypeLower(gherkinPart);
-        }
+        // }
     }
 
     getCompletion(line: string, lineNumber: number, text: string): CompletionItem[] | null {
