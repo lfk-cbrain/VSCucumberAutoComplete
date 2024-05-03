@@ -10,6 +10,7 @@ import {
     Diagnostic,
     TextDocumentPositionParams,
     CompletionItem,
+    CompletionItemKind,
     Definition,
     Range,
     Position,
@@ -121,10 +122,56 @@ documents.onDidOpen(() => {
     populateHandlers();
 });
 
+// Function to get the word before the cursor position in a line of text
+function getWordBeforeCursor(line: string, char: number): string {
+    const beforeCursor = line.slice(0, char).trim();
+    const words = beforeCursor.split(/\s+/);
+    return words.length > 0 ? words[words.length - 1] : "";
+}
+
+function findCaseHandlers(featureText) {
+    const lines = featureText.split(/\r?\n/);
+    let inBackground = false;
+    const completionItems = [];
+
+    for (const line of lines) {
+        // Check if the line starts with 'Background:'
+        if (line.trim().startsWith('Background:')) {
+            inBackground = true;
+        }
+        // Check if the line starts with 'Scenario:'
+        else if (line.trim().startsWith('Scenario:')) {
+            inBackground = false;
+        }
+
+        if (inBackground) {
+            // Match lines starting with 'Given case' followed by a case handler name
+            const caseHandlerMatch = line.trim().match(/^Given case (\S+)(?: with (taskguide \S+|case \S+))?/);
+            if (caseHandlerMatch) {
+                const completionItem = {
+                    label: caseHandlerMatch[1],
+                    kind: CompletionItemKind.Variable,
+                    documentation: caseHandlerMatch[2]
+                }
+                completionItems.push(completionItem);
+            }
+        }
+    }
+
+    return completionItems;
+}
+
 connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[] => {
     const text = documents.get(position.textDocument.uri).getText();
     const line = text.split(/\r?\n/g)[position.position.line];
     const char = position.position.character;
+
+    // Check if the word before the cursor is "case"
+    const wordBeforeCursor = getWordBeforeCursor(line, char);
+    if (wordBeforeCursor === "case") {
+        return findCaseHandlers(text);
+    }
+
     if (pagesPosition(line, char) && pagesHandler) {
         return pagesHandler.getCompletion(line, position.position);
     }

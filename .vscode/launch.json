@@ -6,30 +6,17 @@
       "type": "extensionHost",
       "request": "launch",
       "runtimeExecutable": "${execPath}",
-      "args": ["--extensionDevelopmentPath=${workspaceRoot}/gclient"],
-      "stopOnEntry": false,
+      "args": ["--extensionDevelopmentPath=${workspaceRoot}/gclient", "--disable-extensions"],
+      "outFiles": ["${workspaceFolder}/gclient/**/*.js"],
       "sourceMaps": true,
-      "outFiles": ["${workspaceRoot}/gclient/out/src/**/*.js"],
-      "preLaunchTask": "npm"
+      "preLaunchTask": "npm",
+      "trace": true
     },
     {
       "name": "Attach to Language Server",
       "port": 9229,
       "request": "attach",
       "skipFiles": ["<node_internals>/**"],
-      "type": "node"
-    },
-    {
-      "name": "Debug Server Tests",
-      "request": "launch",
-      "runtimeArgs": [
-        "run-script",
-        "test"
-      ],
-      "runtimeExecutable": "npm",
-      "skipFiles": [
-        "<node_internals>/**"
-      ],
       "type": "node"
     }
   ]
