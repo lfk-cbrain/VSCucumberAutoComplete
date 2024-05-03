@@ -48,6 +48,7 @@ connection.onInitialize((params): InitializeResult => {
             //Completion will be triggered after every character pressing
             completionProvider: {
                 resolveProvider: true,
+                triggerCharacters: [' ']
             },
             definitionProvider: true,
             documentFormattingProvider: true,
@@ -129,7 +130,7 @@ function getWordBeforeCursor(line: string, char: number): string {
     return words.length > 0 ? words[words.length - 1] : "";
 }
 
-function findCaseHandlers(featureText) {
+function findCaseHandlers(featureText) : CompletionItem[] {
     const lines = featureText.split(/\r?\n/);
     let inBackground = false;
     const completionItems = [];
@@ -148,10 +149,16 @@ function findCaseHandlers(featureText) {
             // Match lines starting with 'Given case' followed by a case handler name
             const caseHandlerMatch = line.trim().match(/^Given case (\S+)(?: with (taskguide \S+|case \S+))?/);
             if (caseHandlerMatch) {
+                const caseHandler = caseHandlerMatch[1];
+                const caseHandlerType = caseHandlerMatch[2];
+                const insertText = caseHandler;
+
                 const completionItem = {
-                    label: caseHandlerMatch[1],
+                    label: caseHandler,
                     kind: CompletionItemKind.Variable,
-                    documentation: caseHandlerMatch[2]
+                    documentation: caseHandlerType,
+                    insertText: insertText,
+                    sortText: "A_"
                 }
                 completionItems.push(completionItem);
             }
@@ -165,19 +172,31 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
     const text = documents.get(position.textDocument.uri).getText();
     const line = text.split(/\r?\n/g)[position.position.line];
     const char = position.position.character;
+    let allCompletionItems: CompletionItem[] = [];
 
     // Check if the word before the cursor is "case"
     const wordBeforeCursor = getWordBeforeCursor(line, char);
     if (wordBeforeCursor === "case") {
-        return findCaseHandlers(text);
+        const caseHandlers = findCaseHandlers(text);
+        // Check if the last character in the line is a space
+        const lastCharIsSpace = /\s$/.test(line);
+        // Modify insertText based on whether the last character is a space or not
+        caseHandlers.forEach(item => {
+            item.insertText = lastCharIsSpace ? item.label : "case " + item.label;
+        });
+        allCompletionItems = allCompletionItems.concat(caseHandlers);
     }
 
     if (pagesPosition(line, char) && pagesHandler) {
-        return pagesHandler.getCompletion(line, position.position);
+        const pageCompletionItems = pagesHandler.getCompletion(line, position.position);
+        allCompletionItems = allCompletionItems.concat(pageCompletionItems);
     }
     if (handleSteps() && stepsHandler) {
-        return stepsHandler.getCompletion(line, position.position.line, text);
+        const stepsCompletionItems = stepsHandler.getCompletion(line, position.position.line, text);
+        allCompletionItems = allCompletionItems.concat(stepsCompletionItems);
     }
+
+    return allCompletionItems;
 });
 
 connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
