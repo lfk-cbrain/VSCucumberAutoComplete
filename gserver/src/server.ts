@@ -26,6 +26,7 @@ import PagesHandler from './pages.handler';
 import { getOSPath, clearGherkinComments } from './util';
 import * as glob from 'glob';
 import * as fs from 'fs';
+import * as path from 'path';
 
 //Create connection and setup communication between the client and server
 const connection: IConnection = createConnection(new IPCMessageReader(process), new IPCMessageWriter(process));
@@ -48,7 +49,7 @@ connection.onInitialize((params): InitializeResult => {
             //Completion will be triggered after every character pressing
             completionProvider: {
                 resolveProvider: true,
-                triggerCharacters: [' ']
+                triggerCharacters: [' ', '.']
             },
             definitionProvider: true,
             documentFormattingProvider: true,
@@ -130,35 +131,61 @@ function getWordBeforeCursor(line: string, char: number): string {
     return words.length > 0 ? words[words.length - 1] : "";
 }
 
-function findCaseHandlers(featureText) : CompletionItem[] {
+// Finds case handlers in the background section
+// or the scenario where current line (edited line) is.
+function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
     const lines = featureText.split(/\r?\n/);
-    let inBackground = false;
     const completionItems = [];
 
-    for (const line of lines) {
-        // Check if the line starts with 'Background:'
-        if (line.trim().startsWith('Background:')) {
-            inBackground = true;
-        }
-        // Check if the line starts with 'Scenario:'
-        else if (line.trim().startsWith('Scenario:')) {
-            inBackground = false;
-        }
+    let scenarioStartLine = -1;
+    let backgroundStartLine = -1;
 
-        if (inBackground) {
+    // Find the line numbers where the scenario and background statements start
+    for (let i = currentLine; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (line.startsWith('Scenario:')) {
+            scenarioStartLine = i;
+            break;
+        } else if (line.startsWith('Background:')) {
+            backgroundStartLine = i;
+        }
+    }
+
+    // Find the first scenario line from the beginning of the file
+    let firstScenarioLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().startsWith('Scenario:')) {
+            firstScenarioLine = i;
+            break;
+        }
+    }
+
+    // If there's only one background statement at the beginning of the file,
+    // set its span to extend to just before the first scenario line
+    if (backgroundStartLine !== -1 && firstScenarioLine !== -1 && backgroundStartLine < firstScenarioLine) {
+        backgroundStartLine = firstScenarioLine - 1;
+    }
+
+    // Iterate through lines to find case handlers within the scenario and background
+    for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+        const line = lines[lineNumber];
+        const trimmedLine = line.trim();
+
+        // Check if the line starts with 'Given case' and is within the scenario or background interval
+        if (trimmedLine.startsWith('Given case') && ((scenarioStartLine <= lineNumber && lineNumber <= currentLine) || (backgroundStartLine <= lineNumber && lineNumber <= firstScenarioLine))) {
             // Match lines starting with 'Given case' followed by a case handler name
-            const caseHandlerMatch = line.trim().match(/^Given case (\S+)(?: with (taskguide \S+|case \S+))?/);
+            const caseHandlerMatch = trimmedLine.match(/^Given case (\S+)(?: with taskguide (\S+)| is (\S+))?/);
             if (caseHandlerMatch) {
                 const caseHandler = caseHandlerMatch[1];
-                const caseHandlerType = caseHandlerMatch[2];
-                const insertText = caseHandler;
+                let taskGuideType: string;
+                caseHandlerMatch[2] !== undefined ? taskGuideType = caseHandlerMatch[2] : taskGuideType = caseHandlerMatch[3]
 
                 const completionItem = {
                     label: caseHandler,
                     kind: CompletionItemKind.Variable,
-                    documentation: caseHandlerType,
-                    insertText: insertText,
-                    sortText: "A_"
+                    detail: `Taskguide: ${taskGuideType}`,
+                    sortText: "A_",
+                    data: ""
                 }
                 completionItems.push(completionItem);
             }
@@ -172,42 +199,125 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
     const text = documents.get(position.textDocument.uri).getText();
     const line = text.split(/\r?\n/g)[position.position.line];
     const char = position.position.character;
+    const wordBeforeCursor = getWordBeforeCursor(line, char);
+    const caseHandlers = findCaseHandlers(text, position.position.line);
+
     let allCompletionItems: CompletionItem[] = [];
 
-    // Check if the word before the cursor is "case"
-    const wordBeforeCursor = getWordBeforeCursor(line, char);
-    if (wordBeforeCursor === "case") {
-        const caseHandlers = findCaseHandlers(text);
-        // Check if the last character in the line is a space
-        const lastCharIsSpace = /\s$/.test(line);
-        // Modify insertText based on whether the last character is a space or not
-        caseHandlers.forEach(item => {
-            item.insertText = lastCharIsSpace ? item.label : "case " + item.label;
-        });
-        allCompletionItems = allCompletionItems.concat(caseHandlers);
+    if (wordBeforeCursor === "case" || wordBeforeCursor === "field") {
+        allCompletionItems = addCaseHandlersToCompletionItems(line, caseHandlers, allCompletionItems);
     }
 
+    allCompletionItems = extractFieldsForCaseHandlerIfPossible(caseHandlers, wordBeforeCursor, allCompletionItems);
+
     if (pagesPosition(line, char) && pagesHandler) {
-        const pageCompletionItems = pagesHandler.getCompletion(line, position.position);
-        allCompletionItems = allCompletionItems.concat(pageCompletionItems);
+        allCompletionItems = allCompletionItems.concat(pagesHandler.getCompletion(line, position.position));
     }
     if (handleSteps() && stepsHandler) {
-        const stepsCompletionItems = stepsHandler.getCompletion(line, position.position.line, text);
-        allCompletionItems = allCompletionItems.concat(stepsCompletionItems);
+        allCompletionItems = allCompletionItems.concat(stepsHandler.getCompletion(line, position.position.line, text));
     }
+    
 
     return allCompletionItems;
 });
 
 connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
-    if (~item.data.indexOf('step')) {
-        return stepsHandler.getCompletionResolve(item);
-    }
-    if (~item.data.indexOf('page')) {
-        return pagesHandler.getCompletionResolve(item);
+    if (item.data) {
+        if (~item.data.indexOf('step')) {
+            return stepsHandler.getCompletionResolve(item);
+        }
+        if (~item.data.indexOf('page')) {
+            return pagesHandler.getCompletionResolve(item);
+        }
     }
     return item;
 });
+
+function extractFieldsForCaseHandlerIfPossible(caseHandlers: CompletionItem[], wordBeforeCursor: string, allCompletionItems: CompletionItem[]) {
+    const caseHandlerBeforeCursor = caseHandlers.filter(handler => `${handler.label}.` === wordBeforeCursor);
+
+    if (caseHandlerBeforeCursor.length > 0 && caseHandlerBeforeCursor[0].detail != null) {
+        const caseHandler = caseHandlerBeforeCursor[0];
+        const fileName = caseHandler.detail.split(" ")[1];
+
+        const taskGuidesFolder = path.join(workspaceRoot, 'Data', 'TaskGuides');
+        const fallbackTaskGuidesFolder = path.join(workspaceRoot, 'TaskGuides');
+        const taskGuidesPath = fs.existsSync(taskGuidesFolder) ? taskGuidesFolder : fallbackTaskGuidesFolder;
+
+        // Find the directory that matches with the filename (casehandler taskguide) 
+        // and then find the fields file.
+        fs.readdirSync(taskGuidesPath).forEach(dir => {
+            if (dir.toLowerCase() === fileName.toLowerCase()) {
+                const foundTaskGuideFolder = path.join(taskGuidesPath, dir);
+                fs.readdirSync(foundTaskGuideFolder).forEach(file => {
+                    if (file.startsWith(fileName) && /\.fields\.xml$/.test(file)) {
+                        const filePath = path.join(foundTaskGuideFolder, file);
+                        try {
+                            const fileContents = fs.readFileSync(filePath, 'utf8');
+                            const completionItemsFromXml = parseXmlForCompletionItems(fileContents);
+                            allCompletionItems = allCompletionItems.concat(completionItemsFromXml);
+                            return allCompletionItems
+                        } catch (error) {
+                            console.error(`Error reading or parsing file: ${file}`);
+                            console.error(error);
+                        }
+                    }
+                });
+            }
+        });
+    }
+    return allCompletionItems;
+}
+
+function parseXmlForCompletionItems(xmlContent: string): CompletionItem[] {
+    const completionItems: CompletionItem[] = [];
+
+    const nameAttributeRegex = /Name="([^"]+)"/;
+    const typeAttributeRegex = /Type="([^"]+)"/;
+    const TitleAttributeRegex = /Title="([^"]+)"/;
+
+    const lines = xmlContent.split(/\r?\n/);
+
+    for (const line of lines) {
+        const nameMatch = nameAttributeRegex.exec(line);
+        const typeMatch = typeAttributeRegex.exec(line);
+        const titleMatch = TitleAttributeRegex.exec(line);
+
+        let typeText: string = "";
+        let detailText: string = "";
+
+        if (typeMatch) {
+            typeText = typeMatch[1];
+            detailText += `Type: "${typeText}" \n`
+        }
+
+        if (titleMatch) {
+            detailText += `Title: "${titleMatch[1]}"`
+        }
+
+        if (nameMatch) {
+            completionItems.push({
+                label: nameMatch[1],
+                detail: typeText,
+                documentation: detailText,
+                kind: CompletionItemKind.Variable,
+                sortText: "AA_",
+                data: "",
+            });
+        }
+    }
+    return completionItems;
+}
+
+function addCaseHandlersToCompletionItems(line: string, caseHandlers: CompletionItem[], allCompletionItems: CompletionItem[]) {
+    const lastCharIsSpace = /\s$/.test(line);
+    caseHandlers.forEach(item => {
+        item.insertText = lastCharIsSpace ? item.label : "case " + item.label;
+    });
+
+    allCompletionItems = allCompletionItems.concat(caseHandlers);
+    return allCompletionItems;
+}
 
 function validate(text: string): Diagnostic[] {
     return text.split(/\r?\n/g).reduce((res, line, i) => {
