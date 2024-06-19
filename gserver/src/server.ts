@@ -208,13 +208,14 @@ connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[]
     }
 
     if (pagesPosition(line, char) && pagesHandler) {
-        var res = pagesHandler.getCompletion(line, position.position);
+        const res = pagesHandler.getCompletion(line, position.position);
         if (res != null) {
             allCompletionItems = allCompletionItems.concat(res);
         }
     }
+
     if (handleSteps() && stepsHandler) {
-        var res = stepsHandler.getCompletion(line, position.position.line, text);
+        const res = stepsHandler.getCompletion(line, position.position.line, text);
         if (res != null) {
             allCompletionItems = allCompletionItems.concat(res);
         }
