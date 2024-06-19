@@ -124,7 +124,6 @@ documents.onDidOpen(() => {
     populateHandlers();
 });
 
-// Function to get the word before the cursor position in a line of text
 function getWordBeforeCursor(line: string, char: number): string {
     const beforeCursor = line.slice(0, char).trim();
     const words = beforeCursor.split(/\s+/);
@@ -140,7 +139,6 @@ function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
     let scenarioStartLine = -1;
     let backgroundStartLine = -1;
 
-    // Find the line numbers where the scenario and background statements start
     for (let i = currentLine; i >= 0; i--) {
         const line = lines[i].trim();
         if (line.startsWith('Scenario:')) {
@@ -151,7 +149,6 @@ function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
         }
     }
 
-    // Find the first scenario line from the beginning of the file
     let firstScenarioLine = -1;
     for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim().startsWith('Scenario:')) {
@@ -160,20 +157,15 @@ function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
         }
     }
 
-    // If there's only one background statement at the beginning of the file,
-    // set its span to extend to just before the first scenario line
     if (backgroundStartLine !== -1 && firstScenarioLine !== -1 && backgroundStartLine < firstScenarioLine) {
         backgroundStartLine = firstScenarioLine - 1;
     }
 
-    // Iterate through lines to find case handlers within the scenario and background
     for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
         const line = lines[lineNumber];
         const trimmedLine = line.trim();
 
-        // Check if the line starts with 'Given case' and is within the scenario or background interval
         if (trimmedLine.startsWith('Given case') && ((scenarioStartLine <= lineNumber && lineNumber <= currentLine) || (backgroundStartLine <= lineNumber && lineNumber <= firstScenarioLine))) {
-            // Match lines starting with 'Given case' followed by a case handler name
             const caseHandlerMatch = trimmedLine.match(/^Given case (\S+)(?: with taskguide (\S+)| is (\S+))?/);
             if (caseHandlerMatch) {
                 const caseHandler = caseHandlerMatch[1];
@@ -184,7 +176,7 @@ function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
                     label: caseHandler,
                     kind: CompletionItemKind.Variable,
                     detail: `Taskguide: ${taskGuideType}`,
-                    sortText: "A_",
+                    sortText: "AAA_",
                     data: ""
                 }
                 completionItems.push(completionItem);
@@ -197,26 +189,36 @@ function findCaseHandlers(featureText, currentLine: number): CompletionItem[] {
 
 connection.onCompletion((position: TextDocumentPositionParams): CompletionItem[] => {
     const text = documents.get(position.textDocument.uri).getText();
-    const line = text.split(/\r?\n/g)[position.position.line];
+    const lines = text.split(/\r?\n/g);
+    const line = lines[position.position.line];
+    const lineUntilCursor = line.slice(0, position.position.character);
     const char = position.position.character;
+
     const wordBeforeCursor = getWordBeforeCursor(line, char);
     const caseHandlers = findCaseHandlers(text, position.position.line);
 
     let allCompletionItems: CompletionItem[] = [];
 
-    if (wordBeforeCursor === "case" || wordBeforeCursor === "field") {
-        allCompletionItems = addCaseHandlersToCompletionItems(line, caseHandlers, allCompletionItems);
+    if (wordBeforeCursor === "case" || wordBeforeCursor === "field" || wordBeforeCursor === "enum") {
+        allCompletionItems = addCaseHandlersToCompletionItems(lineUntilCursor, caseHandlers, allCompletionItems);
     }
 
-    allCompletionItems = extractFieldsForCaseHandlerIfPossible(caseHandlers, wordBeforeCursor, allCompletionItems);
+    if (wordBeforeCursor.endsWith(".")) {
+        allCompletionItems = extractFieldsForCaseHandlerIfPossible(caseHandlers, wordBeforeCursor, allCompletionItems);
+    }
 
     if (pagesPosition(line, char) && pagesHandler) {
-        allCompletionItems = allCompletionItems.concat(pagesHandler.getCompletion(line, position.position));
+        var res = pagesHandler.getCompletion(line, position.position);
+        if (res != null) {
+            allCompletionItems = allCompletionItems.concat(res);
+        }
     }
     if (handleSteps() && stepsHandler) {
-        allCompletionItems = allCompletionItems.concat(stepsHandler.getCompletion(line, position.position.line, text));
+        var res = stepsHandler.getCompletion(line, position.position.line, text);
+        if (res != null) {
+            allCompletionItems = allCompletionItems.concat(res);
+        }
     }
-    
 
     return allCompletionItems;
 });
@@ -288,11 +290,11 @@ function parseXmlForCompletionItems(xmlContent: string): CompletionItem[] {
 
         if (typeMatch) {
             typeText = typeMatch[1];
-            detailText += `Type: "${typeText}" \n`
+            detailText += `Type: ${typeText} \n`
         }
 
         if (titleMatch) {
-            detailText += `Title: "${titleMatch[1]}"`
+            detailText += `Title: ${titleMatch[1]}`
         }
 
         if (nameMatch) {
